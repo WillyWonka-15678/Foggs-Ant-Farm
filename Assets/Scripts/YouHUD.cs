@@ -23,6 +23,8 @@ public class YouHUD : MonoBehaviour
     public float ReservedBelow { get; set; }
     bool placed;
     float currentY;
+    bool hasCase;
+    Bounds caseLocal;
     float scaleMul = 1f;
     float baseScale;
     public float WorldWidth => baseHeight * s.youHudWidth * scaleMul;
@@ -123,11 +125,6 @@ public class YouHUD : MonoBehaviour
         else if (right != null) p = right.transform.position;
         else return;
 
-        // 小人面板的顶边
-        float top = float.MinValue;
-        if (left != null)  top = Mathf.Max(top, left.transform.position.y  + left.WorldPanelHeight);
-        if (right != null) top = Mathf.Max(top, right.transform.position.y + right.WorldPanelHeight);
-
         // 放大：报告期间平滑放大
         bool running = s.Phase == ShiftPhase.Running;
         float targetScale = running ? 1f : Mathf.Max(1f, s.reportScale);
@@ -137,8 +134,11 @@ public class YouHUD : MonoBehaviour
         float targetY;
         if (running)
         {
-            // YOU 放在最上面：小人面板顶边 + 留白 + 提示预留空间（提示越叠越多，YOU 被慢慢顶高）
-            targetY = top + baseHeight * s.youHudLift + ReservedBelow;
+            // 固定在小人面板正上方，不受系统提示影响
+            float top = float.MinValue;
+            if (left != null)  top = Mathf.Max(top, left.transform.position.y  + left.WorldPanelHeight);
+            if (right != null) top = Mathf.Max(top, right.transform.position.y + right.WorldPanelHeight);
+            targetY = top + baseHeight * s.youHudLift;
         }
         else
         {
@@ -148,10 +148,41 @@ public class YouHUD : MonoBehaviour
             if (right != null) bottom = Mathf.Min(bottom, right.transform.position.y);
             targetY = bottom;
         }
+
         if (!placed) { currentY = targetY; placed = true; }
         currentY = Mathf.Lerp(currentY, targetY, 1f - Mathf.Exp(-6f * Time.deltaTime));
         p.y = currentY;
+
+        // 往远离观众的方向推
+        p += BackOffset();
         transform.position = p;
+    }
+
+    Vector3 BackOffset()
+    {
+        var box = s.caseBox;
+        if (box == null || s.youHudBack == 0f) return Vector3.zero;
+
+        if (!hasCase)
+        {
+            var mf = box.GetComponent<MeshFilter>();
+            caseLocal = (mf != null && mf.sharedMesh != null) ? mf.sharedMesh.bounds : new Bounds(Vector3.zero, Vector3.one);
+            hasCase = true;
+        }
+
+        // 观众在箱子的哪一侧，就往另一侧推
+        float sign = -1f;
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            Vector3 camLocal = box.InverseTransformPoint(cam.transform.position);
+            sign = camLocal.z >= caseLocal.center.z ? -1f : 1f;
+        }
+        Vector3 back = box.forward; back.y = 0f;
+        back = back.sqrMagnitude > 1e-6f ? back.normalized : Vector3.forward;
+
+        float depth = Mathf.Abs(caseLocal.size.z * box.lossyScale.z);
+        return back * sign * depth * s.youHudBack;
     }
 
     void Refresh()

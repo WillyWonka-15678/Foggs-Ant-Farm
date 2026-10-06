@@ -105,3 +105,7 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Meta 开发助手的本机设置（含访问令牌，不提交）
+/[Aa]ssets/Resources/DevAgentSettings.asset
+/[Aa]ssets/Resources/DevAgentSettings.asset.meta

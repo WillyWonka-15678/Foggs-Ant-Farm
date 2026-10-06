@@ -4,11 +4,11 @@ using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
-/// 悬浮在空中的系统提示，像砖块一样往上叠。
-///   左边小人的消息 → 箱子左前角外侧
-///   右边小人的消息 → 箱子右前角外侧
-///   观众本人的消息 → YOU 面板下方（叠得越多，YOU 被顶得越高）
-/// 新消息出现在最下面，旧消息往上推。
+/// 悬浮在空中的系统提示，像砖块一样叠起来。
+///   左边小人的消息 → 箱子左前角外侧，往上叠（新消息在最下面）
+///   右边小人的消息 → 箱子右前角外侧，往上叠
+///   观众本人的消息 → 箱子正面上沿中点、再靠近观众一点，往下叠（新消息在最上面，不挡箱子里的小人）
+///   （没有 Case Box 时：观众消息在 YOU 面板上方往上叠）
 ///
 /// 三种退场：
 ///   照做了（任务完成）/ 奖励到时 → 上浮淡出，图标飞走（反转后飞进 YOU 面板）
@@ -33,9 +33,17 @@ public class FloatingPrompts : MonoBehaviour
     [Range(0f, 1.5f)] public float sideHeight = 0.6f;
     public float forwardOffset = 0f;
 
-    [Header("观众提示：YOU 面板下方")]
+    [Header("观众提示：箱子正面上沿中点，往下叠")]
+    [Tooltip("提示宽度（米）")]
+    public float youCaseToastWidth = 0.25f;
+    [Tooltip("从箱子正面往观众方向推出多少（米）")]
+    public float youCaseForward = 0.05f;
+    [Tooltip("最新一条的上沿比箱子顶面高多少（米），负数 = 更低")]
+    public float youCaseTopOffset = 0f;
+
+    [Header("没有 Case Box 时：观众提示在 YOU 面板上方")]
     public float youToastWidth = 1f;
-    [Tooltip("提示堆与上下之间的留白，以提示高度为单位")]
+    [Tooltip("提示堆与 YOU 面板之间的留白，以提示高度为单位")]
     public float youGap = 0.25f;
 
     [Header("没有 Case Box 时：小人面板上方")]
@@ -165,6 +173,7 @@ public class FloatingPrompts : MonoBehaviour
 
     float YouToastWorldWidth()
     {
+        if (hasCase) return youCaseToastWidth;
         return session != null && session.YouPanel != null ? session.YouPanel.WorldWidth * youToastWidth : 0.2f;
     }
 
@@ -235,13 +244,8 @@ public class FloatingPrompts : MonoBehaviour
         // 检查完成 / 失效 / 到时
         CheckStack(stackLeft); CheckStack(stackRight); CheckStack(stackYou);
 
-        // YOU 面板为提示堆预留空间
-        if (session != null && session.YouPanel != null)
-        {
-            float h = YouToastWorldWidth() * H / W;
-            int n = Mathf.Max(1, stackYou.Count);
-            session.YouPanel.ReservedBelow = h * (2f * youGap + n + (n - 1) * stackSpacing);
-        }
+        // YOU 面板位置固定，不再为提示预留空间
+        if (session != null && session.YouPanel != null) session.YouPanel.ReservedBelow = 0f;
 
         LayoutStack(stackLeft, Slot.Left);
         LayoutStack(stackRight, Slot.Right);
@@ -296,11 +300,14 @@ public class FloatingPrompts : MonoBehaviour
         if (stack.Count == 0) return;
         if (!Anchor(slot, stack[0].worldH, out Vector3 anchor)) return;
 
+        // 观众提示放在箱子前面时往下叠（不挡箱子里的小人），其他堆往上叠
+        float dir = (slot == Slot.You && hasCase) ? -1f : 1f;
+
         float dt = Time.deltaTime;
         for (int i = 0; i < stack.Count; i++)
         {
             var toast = stack[i];
-            float targetY = i * toast.worldH * (1f + stackSpacing);   // 越旧越高
+            float targetY = dir * i * toast.worldH * (1f + stackSpacing);   // 越旧离锚点越远
             if (!toast.placed) { toast.stackY = targetY; toast.placed = true; }
             toast.stackY = Mathf.Lerp(toast.stackY, targetY, 1f - Mathf.Exp(-stackSmoothing * dt));
 
@@ -310,7 +317,7 @@ public class FloatingPrompts : MonoBehaviour
             {
                 float k = Mathf.Clamp01(toast.t / fadeIn);
                 alpha = k;
-                slideOff = -slide * (1f - k) * toast.worldH;
+                slideOff = -dir * slide * (1f - k) * toast.worldH;   // 从堆的外侧滑进来
                 if (k >= 1f) { toast.phase = Phase.Hold; toast.t = 0f; }
             }
 
@@ -371,13 +378,24 @@ public class FloatingPrompts : MonoBehaviour
     {
         anchor = Vector3.zero;
 
+        if (slot == Slot.You && hasCase && caseBox != null)
+        {
+            // 箱子正面上沿中点（两个标定点中间），往观众方向推出，最新一条的上沿对齐箱子顶面
+            FrontOfCase(out float frontZ, out float towardViewer);
+            float scaleZ = Mathf.Max(0.0001f, Mathf.Abs(caseBox.lossyScale.z));
+            float z = frontZ + towardViewer * youCaseForward / scaleZ;
+
+            Vector3 edge = caseBox.TransformPoint(new Vector3(caseLocal.center.x, caseLocal.max.y, z));
+            anchor = edge + Vector3.up * (youCaseTopOffset - toastH);
+            return true;
+        }
+
         if (slot == Slot.You)
         {
             var y = session != null ? session.YouPanel : null;
             if (y == null) return false;
-            int n = Mathf.Max(1, stackYou.Count);
-            float stackHeight = toastH * (n + (n - 1) * stackSpacing);
-            anchor = y.transform.position - Vector3.up * (toastH * youGap + stackHeight);
+            // 最下面一条贴在 YOU 面板上沿，往上叠
+            anchor = y.transform.position + Vector3.up * (y.WorldPanelHeight + toastH * youGap);
             return true;
         }
 
@@ -385,13 +403,7 @@ public class FloatingPrompts : MonoBehaviour
         {
             var cam = Camera.main;
 
-            float frontZ = caseLocal.max.z;
-            if (cam != null)
-            {
-                Vector3 camLocal = caseBox.InverseTransformPoint(cam.transform.position);
-                frontZ = camLocal.z >= caseLocal.center.z ? caseLocal.max.z : caseLocal.min.z;
-            }
-            float towardViewer = Mathf.Sign(frontZ - caseLocal.center.z);
+            FrontOfCase(out float frontZ, out float towardViewer);
             float z = frontZ + towardViewer * caseLocal.size.z * forwardOffset;
 
             float xSign = cam != null ? Mathf.Sign(Vector3.Dot(caseBox.right, cam.transform.right)) : 1f;
@@ -410,6 +422,19 @@ public class FloatingPrompts : MonoBehaviour
         if (hud == null) return false;
         anchor = hud.transform.position + hud.transform.up * (hud.WorldPanelHeight + panelGap * hud.WorkerHeight);
         return true;
+    }
+
+    /// <summary>箱子朝向观众的那一面（箱子局部 Z），以及朝观众的方向（+1 / -1）</summary>
+    void FrontOfCase(out float frontZ, out float towardViewer)
+    {
+        frontZ = caseLocal.max.z;
+        var cam = Camera.main;
+        if (cam != null)
+        {
+            Vector3 camLocal = caseBox.InverseTransformPoint(cam.transform.position);
+            frontZ = camLocal.z >= caseLocal.center.z ? caseLocal.max.z : caseLocal.min.z;
+        }
+        towardViewer = Mathf.Sign(frontZ - caseLocal.center.z);
     }
 
     // ================= 外观 =================

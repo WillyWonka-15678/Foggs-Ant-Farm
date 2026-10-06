@@ -12,6 +12,8 @@
 - 讨论方案时**优先给出能快速实现的做法**，其他方案作为备选
 - 每次给代码时：说明覆盖哪些文件、需要在 Inspector 里改什么、哪些旧的序列化数值需要手动更新（Unity 会保留场景里组件的旧值，脚本默认值改了不会自动生效，这个问题出现过多次）
 - 环境里无法编译 Unity 代码，报错需要作者截图反馈
+- 头显用 USB 连着电脑时，可以用 Unity 自带的 adb 直接读头显日志（`adb logcat`，Unity 的输出标签为 `Unity`），也能让头显截图（见第 19 节），不必等截图
+- 档案最近更新：2026-10-06（加入 Quest 版进展：标定、手柄、虚拟木块、提示位置调整）
 
 ---
 
@@ -112,24 +114,36 @@
 
 ## 5. 场景结构与坐标约定
 
+主场景 `SampleScene`（Build Settings 里唯一启用的场景）：
+
 ```
-Session        (SessionManager, FeedbackFX, FloatingPrompts)
-Input          (KeyboardInput)
-Cube           (亚克力箱，ProBuilder)
-Area_Left
-  ├ Office_Group
-  │   └ Female_Dress   (WorkerController, Animator)
-  └ Zone_Left          (区域网格)
-Area_Right
-  ├ Rider_Group
-  │   └ Male_Shirt     (WorkerController, Animator)
-  └ Zone_Right
-Main Camera
+[BuildingBlock] Camera Rig    (OVRCameraRig + OVRManager；取代原来的 Main Camera)
+[BuildingBlock] Passthrough   (OVRPassthroughLayer)
+Session        (SessionManager, FeedbackFX, FloatingPrompts, DebugOverlay, BoxCalibrator)
+Input          (KeyboardInput, ControllerInput)
+VirtualScene   (整个虚拟场景的根物体，标定时整体移动 / 旋转)
+  ├ CaseReference
+  │   └ Cube           (亚克力箱，ProBuilder)
+  ├ Area_Left
+  │   ├ Office_Group
+  │   │   └ Female_Dress   (WorkerController, Animator)
+  │   └ Zone_Left          (区域网格)
+  ├ Area_Right
+  │   ├ Rider_Group
+  │   │   └ Male_Shirt     (WorkerController, Animator)
+  │   └ Zone_Right
+  ├ Dashboard
+  └ Blocks               (虚拟木块，每种两块，都挂 VirtualBlock + Interaction SDK 抓取组件)
+      ├ Block_Notify / Block_Notify (1)
+      ├ Block_Bonus  / Block_Bonus (1)
+      └ Block_Assist / Block_Assist (1)
 ```
 
+另有测试场景 `MR_Test`（Build Settings 里未启用），只用来测 QR 码识别（`QRTestProbe`），不接游戏。
+
 - **命名约定：Left / Right = 观众画面里的左右**
-- 当前编辑器里的相机位于箱子 **Z 正方向往回看**，所以"画面左"在世界坐标是 X 正方向
-- **版本二注意**：上头显标定后，系统按"观众站在 Z 负方向"定向，场景会前后翻转。解决：把箱子、两个 Area、道具都放进同一个根物体 `VirtualScene`，标定后把根物体**旋转 Y 180**，所有左右和朝向一起正确
+- VirtualScene 在编辑器里的初始值为位置 (0, -0.5, 0.45)、**旋转 Y 180**（即原计划的"根物体翻转"已做）
+- 追踪原点为 **Eye Level**：应用启动那一刻头显的位置 / 朝向就是原点。Build And Run 时头显往往放在桌上，所以未标定前场景位置是随机的，必须靠标定（第 17 节）对齐真实箱子
 - 编辑器预览相机建议：箱子前方约 0.45 米、高出箱顶 0.3–0.4 米、微微低头
 
 ---
@@ -257,10 +271,12 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 | *X is exhausted. Use ASSIST to restore.*（首次） | ASSIST | ASSIST | 任务 | 小人旁 | 对其放 ASSIST / 自己恢复 |
 | *X down. Output suspended.* | NOTIFY | ASSIST | 任务 | 小人旁 | 同上 |
 | *Boost X with BONUS.*（首次 NOTIFY 成功后） | ASSIST | BONUS | 任务 | 小人旁 | 对其放 BONUS / 离开 Working |
-| *Team Lead inactive 5s* | NOTIFY | — | 任务 | YOU 下方 | 任何一次操作 |
-| 夸奖（每 3 次有效操作，随机：Outstanding, Team Lead! 等） | BONUS | — | 奖励，3.5 秒 | YOU 下方 | 到时 |
-| *Quota reached! New target: N* | BONUS | — | 奖励，4 秒 | YOU 下方 | 到时 |
-| *Shift ending in 00:30* | NOTIFY | — | 持续到结束 | YOU 下方 | 班次结束 |
+| *Team Lead inactive 5s* | NOTIFY | — | 任务 | 箱子正前方 | 任何一次操作 |
+| 夸奖（每 3 次有效操作，随机：Outstanding, Team Lead! 等） | BONUS | — | 奖励，3.5 秒 | 箱子正前方 | 到时 |
+| *Quota reached! New target: N* | BONUS | — | 奖励，4 秒 | 箱子正前方 | 到时 |
+| *Shift ending in 00:30* | NOTIFY | — | 持续到结束 | 箱子正前方 | 班次结束 |
+
+（"箱子正前方"= 观众本人的提示堆，位置见第 11 节）
 
 ### 生命周期
 - **任务型做完才消失**，不做就一直闪；**越拖越快**（每 10 秒速度翻倍，最多 3 倍）
@@ -268,8 +284,10 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
   - **照做了 / 奖励到时** → 上浮淡出，图标飞走（反转后飞进 YOU 面板）
   - **没照做、情况自己变了** → 变灰（换灰色图标）、加速掉落淡出
   - **一班结束** → 直接淡出
-- **堆叠**：新提示在每堆最下面，旧的往上推，退场后自动补位。每堆最多 5 条，超出时最旧的**非任务**提示先退场
-- YOU 下方的提示堆越高，**YOU 面板被顶得越高**
+- **堆叠**：退场后自动补位。每堆最多 5 条，超出时最旧的**非任务**提示先退场
+  - 小人的两堆：新提示在最下面，旧的往上推
+  - 观众本人的一堆：**往下叠**，新提示在最上面（贴着箱顶高度），旧的往下推，可以低于桌面。理由：观众从上往下看箱子，往上叠会挡住箱子里的小人
+- （旧设计"YOU 下方提示越多，YOU 面板被顶得越高"已取消：提示堆移到箱子前方后，YOU 面板位置固定）
 
 ### 呼吸闪烁
 竖条、边框、图标同步呼吸（亮度 + 约 8% 缩放），文字保持稳定。节奏按 Kind：
@@ -285,15 +303,15 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 
 | 层 | 内容 |
 |---|---|
-| 最上 | **YOU 面板**（位置自动计算，永远在最上） |
-| YOU 下方 | 观众本人的提示堆（宽度 = YOU 面板宽度） |
+| 最上 | **YOU 面板**：固定在小人面板正上方（底边比小人面板顶边高 `youHudLift` = 0.05 个小人身高），并往**远离观众**的方向推箱子深度的 `youHudBack` = 0.5，不受提示影响 |
 | 中间 | 两块**小人面板**（各自头顶） |
 | 箱子左右两侧外面、靠前角 | 两个小人各自的提示堆（宽约箱子宽度的 0.55，从箱高 0.6 处往上叠） |
+| 箱子正面上沿中点、再往观众方向推 5 cm | **观众本人的提示堆**（宽 25 cm，最新一条的上沿与箱顶齐平，往下叠，可以低于桌面）。即两个标定点的正中间 |
 | 底部 | 亚克力箱、两个区域、两个小人 |
 
-层级本身就是叙事：**你 → 系统的声音 → 小人**。
+旧布局的说法是"层级本身就是叙事：你 → 系统的声音 → 小人"（从上到下）。观众提示移到箱子正前方后，这个上下顺序已经不成立，新布局的叙事含义**待作者确认**。
 
-提示位置的迭代过程（供参考，避免重走）：面板内 → 各面板上方（与 YOU 重叠）→ 箱子前沿上方（与小人面板投影重叠，放大挡、缩小看不清）→ **现方案**。曾考虑"拉近到观众眼前"，但观众本身距箱子只有 0.4–0.5 米，提示不能比箱子更近。
+提示位置的迭代过程（供参考，避免重走）：面板内 → 各面板上方（与 YOU 重叠）→ 箱子前沿上方（与小人面板投影重叠，放大挡、缩小看不清）→ 小人提示放箱子两侧、观众提示在 YOU 下方 → 观众提示移到 YOU 上方 → **现方案**（2026-10-06：观众提示移到箱子正面上沿、往下叠；之前"前沿上方"被否决是因为往上叠会挡住小人，往下叠避开了这个问题）。曾考虑"拉近到观众眼前"，但观众本身距箱子只有 0.4–0.5 米，提示不能比箱子更近。
 
 所有面板始终正面朝向相机（观众的头）。
 
@@ -393,8 +411,23 @@ Your next shift begins in 00:10
 
 R = 立即开始新的一班。脚本兼容新旧输入系统。
 
+### 头显：手柄（ControllerInput，与 KeyboardInput 并存）
+| | NOTIFY | BONUS | ASSIST |
+|---|---|---|---|
+| 左手柄 → 左边小人 | X | Y | 扳机 |
+| 右手柄 → 右边小人 | A | B | 扳机 |
+
+按下右摇杆 = 开始新的一班。有震动反馈（有效 0.6 / 无效 0.2）。标定期间自动停用，避免误放。
+
+### 头显：用手抓虚拟木块（VirtualBlock）
+- `VirtualScene/Blocks` 下有虚拟木块（每种两块），用 Building Blocks 加了 Interaction SDK 的抓取组件（Grabbable / GrabInteractable / HandGrabInteractable），手和手柄都能抓
+- 木块不受重力（Rigidbody 设为 kinematic），因为现实里的桌子没有碰撞体，掉下去会一直往下落
+- **松手判定**：木块中心在 Zone_Left / Zone_Right 的水平范围内，高度在区域底部到"区域顶部 + 12 cm"之间，就对那边的小人放一次
+- **松手后**（2026-10-06 改）：手里那块缩小消失，原位"长出"一块新的。实际做法是同一块瞬移回原位，从很小放大到正常大小（0.25 秒）；松手处留一个只有外观的残影缩小消失（0.2 秒，图标同时淡出；木块本体是不透明材质，只缩小不淡出）。不真的删除再生成，是因为复制 Interaction SDK 的抓取组件容易出现"新木块抓不起来"的问题。新木块还在放大时就能抓
+- 图标自动贴在四个侧面和顶面（读 SessionManager 里的彩色图标）。顶面图标的朝向按两个区域的连线（左区 → 右区 = 观众的右手方向）判断，并吸附到木块的边上（2026-10-06 修：原来用启动时的相机方向，在头显里会斜）
+
 ### 架构原则
-输入与逻辑分离：WorkerController 只提供 `ReceiveBlock(BlockType)`，自己不监听任何输入。KeyboardInput 只负责"哪个区域放了哪种木块"。版本二换成 QR / RFID 脚本时，其他脚本一行不改。所有统计通过 `WorkerController.BlockReceived` 事件自动接上。
+输入与逻辑分离：WorkerController 只提供 `ReceiveBlock(BlockType)`，自己不监听任何输入。KeyboardInput / ControllerInput / VirtualBlock 都只负责"哪个区域放了哪种木块"。换成 QR / RFID 脚本时，其他脚本一行不改。所有统计通过 `WorkerController.BlockReceived` 事件自动接上。
 
 ---
 
@@ -404,6 +437,11 @@ R = 立即开始新的一班。脚本兼容新旧输入系统。
 |---|---|---|
 | `WorkerController` | 每个小人 | 状态、疲劳、产出、木块规则、动画参数、道具；`BlockReceived` 事件 |
 | `KeyboardInput` | Input | 键盘模拟放木块 |
+| `ControllerInput` | Input | 头显手柄模拟放木块（第 15 节） |
+| `VirtualBlock` | 每块虚拟木块 | 用手抓取的木块：松手判定、消失与重生、贴图标（第 15 节） |
+| `BoxCalibrator` | Session | 手柄两点标定，把 VirtualScene 对齐到真实箱子（第 17 节） |
+| `DebugOverlay` | Session | 头显里的调试面板：帧率、班次状态、最近日志。按左摇杆（编辑器里按 F1）开关，默认隐藏 |
+| `QRTestProbe` | 只在 MR_Test 场景 | QR 码识别测试：显示内容、追踪状态、抖动、更新频率，按 A / B 计识别用时和消失用时 |
 | `SessionManager` | Session | 一班流程、统计、反转、报告、重置、编号；自动生成三块面板；图标 Sprite 槽位 |
 | `PromptSystem` | （普通类，由 SessionManager 持有） | 决定说什么、何时说、Kind/Action、完成与失效条件 |
 | `FloatingPrompts` | Session | 提示的位置、堆叠、呼吸、三种退场 |
@@ -413,10 +451,23 @@ R = 立即开始新的一班。脚本兼容新旧输入系统。
 | `HUDFactory` | （静态工具） | 配色 Palette、代码搭 UI、进度条、朝向相机、时间格式；单行文字放不下时自动缩小到 60% |
 
 ### Inspector 槽位
-- **SessionManager**：Worker Left = Female_Dress，Worker Right = Male_Shirt；9 个图标槽（彩色 3、报告灰 3、失效灰 3）
-- **KeyboardInput**：Worker Left / Right 同上；Session
+- **SessionManager**：Worker Left = Female_Dress，Worker Right = Male_Shirt；9 个图标槽（彩色 3、报告灰 3、失效灰 3）；Case Box = Cube（用来判断 YOU 面板往哪边推）
+- **KeyboardInput** / **ControllerInput**：Worker Left / Right 同上；Session
 - **FeedbackFX**：Session；Zone Left = Zone_Left（网格），Zone Right = Zone_Right
 - **FloatingPrompts**：Session；Feedback = Session 上的 FeedbackFX；Case Box = Cube
+- **BoxCalibrator**：Virtual Scene = VirtualScene；Case Box = Cube；Zone Left / Right；停用列表不填会自动找 ControllerInput
+- **VirtualBlock**：Type（NOTIFY / BONUS / ASSIST）；Session 和两个区域不填会自动从场景里找
+
+### 主要可调参数（新增）
+| 组件 | 参数 | 默认 | 说明 |
+|---|---|---|---|
+| FloatingPrompts | You Case Toast Width | 0.25 | 观众提示宽度（米） |
+| FloatingPrompts | You Case Forward | 0.05 | 从箱子正面往观众方向推出（米） |
+| FloatingPrompts | You Case Top Offset | 0 | 最新一条的上沿比箱顶高多少（米） |
+| SessionManager | You Hud Lift | 0.05 | YOU 面板底边比小人面板顶边高多少（小人身高为 1） |
+| SessionManager | You Hud Back | 0.5 | YOU 面板往远离观众方向推，占箱子深度的比例 |
+| VirtualBlock | Vanish Time / Spawn Time | 0.2 / 0.25 | 残影消失 / 新木块出现的时长（秒） |
+| VirtualBlock | Above Zone | 0.12 | 区域上方多高以内松手也算放进去（米） |
 
 ### 前置
 Window → TextMeshPro → Import TMP Essential Resources（否则面板没有文字）
@@ -431,12 +482,25 @@ Window → TextMeshPro → Import TMP Essential Resources（否则面板没有�
 ### 必须上 Quest
 Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳定性、尺度与可读性、性能与续航、真人测试。
 
-### 空间标定（已定）
-- **手柄两点标定**：手柄尖端点箱子前面左右两个角（桌面水平，重力已知，两点足够）
-- 标定后存为**持久化空间锚点**，重启自动恢复；加隐藏的手动微调
-- 只在布展时做一次，观众不做
+### Quest 环境配置（已完成）
+- 包：Meta MR Utility Kit 207、Meta Interaction SDK（OVR）207、Unity OpenXR 1.16.1
+- XR 插件：**OpenXR**（只配了 Android）。启用的 Android 功能：Meta XR Feature、Meta Quest Feature、Oculus Touch Controller Profile、Hand Tracking、Meta Hand Tracking Aim、Foveation、Subsampled Layout
+- **Meta XR Space Warp 必须关闭**（曾因开着导致手 / 手柄出现阶梯状撕裂和残影，因为项目没有提交深度和运动矢量；画面很简单，不需要 Space Warp）。建议 Depth Submission Mode = Depth 16 Bit
+- Player：Min API 32、Target API 34、Single Pass Instanced、Graphics Jobs 开
+- 场景用 Building Blocks：Camera Rig、Passthrough、Hand Grab
+- 打包后的包名仍是模板默认的 `com.UnityTechnologies.com.unity.template.urpblank`（可在 Player Settings 改）
+
+### 空间标定（BoxCalibrator，已实现，2026-10-06 头显实测可用）
+- **手柄两点标定**：右手柄前端的黄色小球碰真实箱子**正面（靠近观众那一面）的左上角**，按右扳机；再碰**右上角**，按右扳机（桌面水平，重力已知，两点足够）
+- 然后微调：左摇杆前后左右平移，右摇杆上下移动 / 左右旋转；**A = 完成，B = 重新点**。每一步都会震动一下
+- 面板上显示**宽度误差**（点出来的宽度与虚拟箱子宽度之差），±1.5 cm 内为绿色。实测一次为 3.5 cm，若一直偏大，调 `Tip Offset`（小球相对手柄的位置）
+- 进入方式：头显里启动时**自动进入**；之后同时按住两个握把键 2 秒可重新进入。编辑器里不会自动进入
+- 正面自动判断：根据 Zone_Left / Zone_Right 的位置，保证标定后左区永远在观众左手边
+- 标定期间停用 ControllerInput，避免扳机和 A 键误放木块
+- 黄色小球在标定全程都跟着右手柄（这是正常的，不代表卡住）
+- **尚未做**：标定结果存为持久化空间锚点、重启自动恢复。现在每次启动都要重新标定
+- 只在布展时做，观众不做
 - 原开发计划的三点平均值不是箱子中心，正中心应为"右前角与左后角的中点"
-- 场景根物体需旋转 Y 180（见第 5 节）
 
 ### 木块检测（待实测）
 - **首选：MRUK QR 码追踪**（Meta MR Utility Kit v78 起支持 Quest 3/3S，官方标注为实验功能）
@@ -446,9 +510,10 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
   - 展览期间关闭头显系统自动更新
 - **后备：RFID**：木块内嵌 RFID 贴纸，左右区各一个读卡器，接 Arduino，WiFi 发给 Quest。即时、稳定、不受光线影响，多 1–2 天开发 + 采购硬件
 - 注意：AR Foundation 的图像追踪在 Quest 3 上不支持，原开发计划的 BlockTracker 方案不可用
+- 现状：测试工具 `QRTestProbe`（MR_Test 场景）已写好；**测试结果尚未记录到本档案，请作者补充**。同时已做了**用手抓虚拟木块**的输入方式（第 15 节），可在真实木块方案确定前先用来测试整套流程
 
 ### 工作顺序
-键盘版逻辑（已完成）→ 配 Quest 环境 + 测 QR → 决定 QR / RFID → 整合 → 展场光照测试 → 真人测试
+键盘版逻辑（已完成）→ 配 Quest 环境（已完成）+ 测 QR（工具已写，结果待记录）→ 决定 QR / RFID → 整合 → 展场光照测试 → 真人测试
 
 ---
 
@@ -467,7 +532,9 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
 | YOU 颜色 = 系统对你用的木块 | 与小人面板形成镜像 |
 | 提示分 Kind / Action | 修正"文案说 NOTIFY 图标却是 ASSIST"的混淆 |
 | 任务型提示做完才消失、越拖越急 | 提示从"一句话"变成"一个任务"，像不会自己消失的红点 |
-| 提示堆叠、把 YOU 顶高 | 没处理的系统消息物理地堆积 |
+| 提示堆叠 | 没处理的系统消息物理地堆积（原来还会"把 YOU 顶高"，提示移到箱子前方后取消） |
+| 观众提示放箱子正前方、往下叠 | 离观众最近、在两个标定点中间；往下叠不挡箱子里的小人 |
+| 虚拟木块松手后消失、原位重生 | （理由待作者补充） |
 | 反转无声 + 标题 TEAM LEAD (YOU) | 保留发现感，同时用排行榜语言让多数人注意到 |
 | 报告才出现编号 #007 | "你"在最后一刻变成"第 N 个"，暗示可替换 |
 | 报告灰图标只在报告出现 | 避免提前剧透"真实含义" |
@@ -485,6 +552,15 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
 - Animator 改参数要在 Play 时先选中场景里的角色，输入数值后按回车
 - MissingReferenceException（GameObjectInspector）是编辑器界面错误，可忽略
 
+**头显相关**
+- 手 / 手柄出现阶梯状撕裂、残影 → 检查 OpenXR（Android）里的 **Meta XR Space Warp 是否关闭**
+- 场景看不到 → 多半是位置问题而不是没渲染：追踪原点是 Eye Level，以启动那一刻头显的位置为准。先做标定；或长按右手柄 Meta 键重新校准朝向再找
+- 手柄按键没反应但位置在动 → 先检查**手柄电量**（出现过一次没电）
+- **adb 位置**：`C:/Program Files/Unity/Hub/Editor/6000.0.59f2/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb.exe`
+  - 读日志：`adb logcat -d -v time`，Unity 的输出标签为 `Unity`；日志缓冲区很快会被系统信息冲掉，要看启动过程就先 `adb logcat -c` 再重启应用
+  - 让头显截图：`adb shell am startservice -n com.oculus.metacam/.capture.CaptureService -a TAKE_SCREENSHOT`，图片在头显的 `/sdcard/Oculus/Screenshots/`（需要有人戴着头显，否则拍到的是地面）
+  - 在 Git Bash 里用 adb 时，要先 `export MSYS_NO_PATHCONV=1`，否则 `/sdcard/...` 路径会被改写
+
 ---
 
 ## 20. 待办与未来方向
@@ -492,7 +568,10 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
 **近期**
 - [ ] 节奏调参（疲劳速度、任务时长、夸奖频率；目标：第一分钟内每个小人至少倒下一次）
 - [ ] 道具（手机、矮墙、桌椅电脑等）
-- [ ] 第一次上 Quest：Passthrough、标定、QR 测试
+- [x] 第一次上 Quest：Passthrough、标定（已可用）
+- [ ] QR 测试结果记录到档案，决定 QR / RFID
+- [ ] 标定结果存为持久化空间锚点，重启自动恢复
+- [ ] 头显里验证：观众提示新位置的可读性、木块消失 / 重生效果、顶面图标方向
 - [ ] 墙面进场文字定稿
 - [ ] 真人测试，观察反转是否被注意到
 

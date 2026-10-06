@@ -68,8 +68,12 @@ public class SessionManager : MonoBehaviour
     public float workerHudWidth = 1.1f;
     public float workerHudGap = 0.15f;
     public float youHudWidth = 1.4f;
-    [Tooltip("YOU 面板与下方之间的额外留白（提示的空间会自动预留）")]
-    public float youHudLift = 0.08f;
+    [Tooltip("YOU 面板底边比小人面板顶边高出多少（以小人身高为 1）")]
+    public float youHudLift = 0.05f;
+    [Tooltip("可选：代表亚克力箱的 Cube，用来判断哪边是远离观众的方向")]
+    public Transform caseBox;
+    [Tooltip("YOU 面板往远离观众的方向移动多少，占箱子深度的比例（0 = 与小人面板同一深度）")]
+    public float youHudBack = 0.5f;
 
     // ================= 对外只读数据 =================
     public ShiftPhase Phase { get; private set; }
