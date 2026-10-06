@@ -2488,6 +2488,7 @@ GameObject:
   - component: {fileID: 681841290}
   - component: {fileID: 681841291}
   - component: {fileID: 681841292}
+  - component: {fileID: 681841293}
   m_Layer: 0
   m_Name: Session
   m_TagString: Untagged
@@ -2509,7 +2510,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   workerLeft: {fileID: 403873674}
   workerRight: {fileID: 932533823}
-  shiftDuration: 180
+  shiftDuration: 120
   startGrace: 10
   leadIdleAfter: 5
   inactivityWarn: 10
@@ -2677,6 +2678,101 @@ MonoBehaviour:
   uiDistance: 0.45
   uiOffsetUp: -0.08
   uiWidth: 0.28
+--- !u!114 &681841293
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 681841286}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 60bb035f034609d4292468f69974fc18, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  session: {fileID: 0}
+  prompts: {fileID: 0}
+  feedback: {fileID: 0}
+  masterVolume: 1
+  spatialBlend: 1
+  minDistance: 1
+  maxDistance: 10
+  maxVoices: 12
+  sameSoundCooldown: 0.08
+  grab:
+    clips:
+    - {fileID: 8300000, guid: f83c580edc085014784774bcf96a8c1e, type: 3}
+    - {fileID: 8300000, guid: 635201158098aff49bc0bbeebbd93e3a, type: 3}
+    - {fileID: 8300000, guid: a6df1bd47f0344240a3eaca9f9ff043c, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  placeNotify:
+    clips:
+    - {fileID: 8300000, guid: f83c580edc085014784774bcf96a8c1e, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  placeBonus:
+    clips:
+    - {fileID: 8300000, guid: a6df1bd47f0344240a3eaca9f9ff043c, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  placeAssist:
+    clips:
+    - {fileID: 8300000, guid: 635201158098aff49bc0bbeebbd93e3a, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  placeInvalid:
+    clips:
+    - {fileID: 8300000, guid: a04b0b0188b119a4c8001366487b1b24, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  vanish:
+    clips: []
+    volume: 1
+    pitchJitter: 0.04
+  respawn:
+    clips: []
+    volume: 1
+    pitchJitter: 0.04
+  shiftStart:
+    clips:
+    - {fileID: 8300000, guid: 3f90572c493faad49be9043e7c610298, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  promptNotify:
+    clips:
+    - {fileID: 8300000, guid: 6aa9c3cb70ebdf141887e9d2416cdc56, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  promptBonus:
+    clips:
+    - {fileID: 8300000, guid: e7520c39857d2e947b64daa9d16693df, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  promptAssist:
+    clips:
+    - {fileID: 8300000, guid: 21a68ecb32248d043bcdd6cc1185d047, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  promptDone:
+    clips:
+    - {fileID: 8300000, guid: cb63f6a4b517bb544b467557b960405d, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  promptMissed:
+    clips:
+    - {fileID: 8300000, guid: 4d70676ee1c67db43ac44ac2a3494db8, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  recordedToYou:
+    clips:
+    - {fileID: 8300000, guid: 1e78d9d23f2cef445ae4294ed1c81bf6, type: 3}
+    volume: 1
+    pitchJitter: 0.04
+  remind: 1
+  remindInterval: 3
+  remindVolume: 0.7
+  maxReminders: 0
 --- !u!1 &689657644
 GameObject:
   m_ObjectHideFlags: 0

@@ -38,6 +38,13 @@ public class VirtualBlock : MonoBehaviour
     [Tooltip("原位的新木块放大出现用多少秒")]
     public float spawnTime = 0.25f;
 
+    // 对外事件（SoundFX 用）：所有木块共用，不需要逐个连线
+    public static event System.Action<VirtualBlock> Grabbed;
+    /// <summary>松手的那一刻（残影开始消失）</summary>
+    public static event System.Action<VirtualBlock> Dropped;
+    /// <summary>新木块在原位开始长出来</summary>
+    public static event System.Action<VirtualBlock> Respawned;
+
     IPointable pointable;
     Rigidbody rb;
     Transform homeParent;
@@ -95,6 +102,7 @@ public class VirtualBlock : MonoBehaviour
         {
             case PointerEventType.Select:
                 holders++;
+                if (holders == 1) Grabbed?.Invoke(this);
                 // 新木块还在放大时就被抓起：立刻恢复正常大小
                 if (returning != null) { StopCoroutine(returning); returning = null; }
                 transform.localScale = homeLocalScale;
@@ -116,7 +124,12 @@ public class VirtualBlock : MonoBehaviour
         if (Inside(zoneLeft))       { target = session != null ? session.workerLeft  : null; side = "LEFT"; }
         else if (Inside(zoneRight)) { target = session != null ? session.workerRight : null; side = "RIGHT"; }
 
-        if (target != null)
+        if (target != null && session != null && session.ConsumeStartPlacement(target))
+        {
+            // 等待阶段：这一块只用来开始这一班，不交给小人
+            Debug.Log($"[Hand] {type} → {side}: shift begins");
+        }
+        else if (target != null)
         {
             WorkerState before = target.State;
             bool valid = target.ReceiveBlock(type);
@@ -128,6 +141,7 @@ public class VirtualBlock : MonoBehaviour
             Debug.Log($"[Hand] {type} released {side}");
         }
 
+        Dropped?.Invoke(this);
         SpawnGhost();
         returning = StartCoroutine(Respawn());
     }
@@ -292,6 +306,7 @@ public class VirtualBlock : MonoBehaviour
             rb.position = transform.position;
             rb.rotation = transform.rotation;
         }
+        Respawned?.Invoke(this);
 
         // 从很小放大到正常大小（不从 0 开始，避免碰撞体尺寸为 0 的警告）
         for (float t = 0f; t < spawnTime; t += Time.deltaTime)

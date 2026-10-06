@@ -9,7 +9,8 @@ using UnityEngine.InputSystem;
 ///            NOTIFY  BONUS  ASSIST
 /// 左区（骑手）   Q       W      E
 /// 右区（工人）   I       O      P
-/// R = 重置两个小人（模拟换下一位观众）
+/// R = 立即开始新的一班（跳过等待）
+/// 等待阶段按任意放置键 = 开始这一班（这一下不作用于小人）
 /// </summary>
 public class KeyboardInput : MonoBehaviour
 {
@@ -25,6 +26,12 @@ public class KeyboardInput : MonoBehaviour
     public bool logToConsole = true;
 
     int actionCount;
+
+    void Start()
+    {
+        // 没拖 SessionManager 时自动找（等待阶段靠它开始一班）
+        if (session == null) session = FindFirstObjectByType<SessionManager>();
+    }
 
     void Update()
     {
@@ -45,6 +52,14 @@ public class KeyboardInput : MonoBehaviour
     void Place(WorkerController worker, BlockType block)
     {
         if (worker == null) return;
+
+        // 等待阶段：这一块只用来开始这一班
+        if (session != null && session.ConsumeStartPlacement(worker))
+        {
+            actionCount = 0;
+            if (logToConsole) Debug.Log($"[Start] {block} → {worker.workerName} side: shift begins");
+            return;
+        }
 
         WorkerState before = worker.State;
         bool valid = worker.ReceiveBlock(block);

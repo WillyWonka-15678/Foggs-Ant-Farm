@@ -87,9 +87,12 @@ public class WorkerController : MonoBehaviour
         anim = GetComponent<Animator>();
     }
 
+    bool initialized;
+
     void Start()
     {
-        ResetWorker();
+        // SessionManager 可能已经先一步把小人设成了休息（等待阶段），不要覆盖
+        if (!initialized) ResetWorker();
     }
 
     void Update()
@@ -263,8 +266,10 @@ public class WorkerController : MonoBehaviour
 
     // ================= 重置（给下一位观众） =================
 
-    public void ResetWorker()
+    /// <param name="idle">true = 重置后休息（等待阶段 / 从等待开始的一班）；false = 重置后开始工作</param>
+    public void ResetWorker(bool idle = false)
     {
+        initialized = true;
         fatigue = 0f;
         output = 0f;
         idleTime = 0f;
@@ -273,13 +278,23 @@ public class WorkerController : MonoBehaviour
         boostPhase = BoostPhase.None;
         boostTimer = 0f;
         currentSpeed = 1f;
-        state = WorkerState.Working;
 
-        // 让 Animator 回到默认状态（Working），避免从 Exhausted 无路可回
-        anim.Rebind();
-        anim.Update(0f);
-        anim.SetInteger(ParamState, (int)WorkerState.Working);
-        anim.SetFloat(ParamSpeed, 1f);
+        if (idle)
+        {
+            // Working / Exhausted 都有连线通往 Idle，直接切参数，动画自然过渡（已经在休息就不变）
+            state = WorkerState.Idle;
+            anim.SetInteger(ParamState, (int)WorkerState.Idle);
+            anim.SetFloat(ParamSpeed, 1f);
+        }
+        else
+        {
+            state = WorkerState.Working;
+            // 让 Animator 回到默认状态（Working），避免从 Exhausted 无路可回
+            anim.Rebind();
+            anim.Update(0f);
+            anim.SetInteger(ParamState, (int)WorkerState.Working);
+            anim.SetFloat(ParamSpeed, 1f);
+        }
 
         ApplyProps(state);
     }

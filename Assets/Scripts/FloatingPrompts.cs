@@ -80,6 +80,18 @@ public class FloatingPrompts : MonoBehaviour
 
     const float W = 440f, H = 76f, B = 3f;
 
+    // ================= 对外事件（SoundFX 用） =================
+    /// <summary>提示第一次出现（消息，提示中心位置）</summary>
+    public event System.Action<PromptMessage, Vector3> ToastShown;
+    /// <summary>照做了，或奖励到时</summary>
+    public event System.Action<PromptMessage, Vector3> ToastResolved;
+    /// <summary>任务没照做、情况自己变了（变灰掉落）</summary>
+    public event System.Action<PromptMessage, Vector3> ToastVoided;
+    /// <summary>最急的那条任务每次闪到最亮时触发（消息，位置，当前加速倍数）</summary>
+    public event System.Action<PromptMessage, Vector3, float> TaskPulse;
+
+    Toast urgent;   // 拖得最久的任务提示
+
     enum Phase { In, Hold, OutUp, OutFall, OutQuiet }
     enum Slot { Left, Right, You }
 
@@ -98,6 +110,7 @@ public class FloatingPrompts : MonoBehaviour
         public float stackY;          // 当前在堆里的高度（米）
         public bool placed;
         public Vector3 leaveFrom;     // 退场时的位置
+        public int peaks;             // 已经闪到第几次最亮（声音的重复提醒用）
     }
 
     readonly List<Toast> stackLeft = new List<Toast>();
@@ -247,11 +260,22 @@ public class FloatingPrompts : MonoBehaviour
         // YOU 面板位置固定，不再为提示预留空间
         if (session != null && session.YouPanel != null) session.YouPanel.ReservedBelow = 0f;
 
+        urgent = null;
+        FindUrgent(stackLeft); FindUrgent(stackRight); FindUrgent(stackYou);
+
         LayoutStack(stackLeft, Slot.Left);
         LayoutStack(stackRight, Slot.Right);
         LayoutStack(stackYou, Slot.You);
         UpdateLeaving();
     }
+
+    void FindUrgent(List<Toast> stack)
+    {
+        foreach (var toast in stack)
+            if (toast.msg.IsTask && (urgent == null || toast.age > urgent.age)) urgent = toast;
+    }
+
+    static Vector3 Center(Toast toast) => toast.root.position + toast.root.up * (toast.worldH * 0.5f);
 
     void QuietAll(List<Toast> stack)
     {
@@ -269,15 +293,18 @@ public class FloatingPrompts : MonoBehaviour
             if (m.IsResolved != null && m.IsResolved())
             {
                 SendIcon(toast);                        // 照做了：图标飞走
+                ToastResolved?.Invoke(m, Center(toast));
                 Leave(toast, Phase.OutUp);
             }
             else if (m.IsVoid != null && m.IsVoid())
             {
+                if (m.IsTask) ToastVoided?.Invoke(m, Center(toast));
                 Leave(toast, m.IsTask ? Phase.OutFall : Phase.OutQuiet);   // 错过了：变灰掉落
             }
             else if (m.Duration > 0f && toast.age >= m.Duration)
             {
                 SendIcon(toast);                        // 奖励到时：图标飞走
+                ToastResolved?.Invoke(m, Center(toast));
                 Leave(toast, Phase.OutUp);
             }
         }
@@ -308,7 +335,8 @@ public class FloatingPrompts : MonoBehaviour
         {
             var toast = stack[i];
             float targetY = dir * i * toast.worldH * (1f + stackSpacing);   // 越旧离锚点越远
-            if (!toast.placed) { toast.stackY = targetY; toast.placed = true; }
+            bool first = !toast.placed;
+            if (first) { toast.stackY = targetY; toast.placed = true; }
             toast.stackY = Mathf.Lerp(toast.stackY, targetY, 1f - Mathf.Exp(-stackSmoothing * dt));
 
             toast.t += dt;
@@ -324,6 +352,7 @@ public class FloatingPrompts : MonoBehaviour
             toast.root.position = anchor + Vector3.up * (toast.stackY + slideOff);
             HUDFactory.FaceCamera(toast.root);
             toast.group.alpha = alpha;
+            if (first) ToastShown?.Invoke(toast.msg, Center(toast));
 
             if (toast.msg.Text != null) toast.text.text = toast.msg.Text();
             Breathe(toast);
@@ -450,12 +479,22 @@ public class FloatingPrompts : MonoBehaviour
         }
 
         // 任务拖得越久，闪得越快
+        float escalation = 1f;
         if (toast.msg.IsTask && escalateSeconds > 0f)
-            hz *= Mathf.Min(maxEscalation, 1f + toast.age / escalateSeconds);
+            escalation = Mathf.Min(maxEscalation, 1f + toast.age / escalateSeconds);
+        hz *= escalation;
 
         // 用累积相位，避免变速时跳帧
         float phase = toast.age * hz;
         float wave = 0.5f + 0.5f * Mathf.Sin(phase * 2f * Mathf.PI);
+
+        // 每次闪到最亮（正弦波顶点）时，通知声音：只有最急的那条会出声
+        int peak = Mathf.FloorToInt(phase - 0.25f);
+        if (peak > toast.peaks)
+        {
+            toast.peaks = peak;
+            if (toast == urgent) TaskPulse?.Invoke(toast.msg, Center(toast), escalation);
+        }
         Color c = Palette.ForBlock(toast.msg.Visual);   // 颜色 = 要你放的木块；节奏 = 系统的情绪
 
         toast.strip.color = Color.Lerp(Color.Lerp(c, Color.black, 0.45f), Color.Lerp(c, Color.white, 0.25f), wave);

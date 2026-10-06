@@ -8,7 +8,8 @@ using UnityEngine;
 ///                    NOTIFY   BONUS   ASSIST
 /// 左手柄 → 左边小人      X        Y      扳机
 /// 右手柄 → 右边小人      A        B      扳机
-/// 按下右摇杆 = 开始新的一班
+/// 按下右摇杆 = 立即开始新的一班（跳过等待）
+/// 等待阶段按任意放置键 = 开始这一班（这一下不作用于小人）
 ///
 /// 挂在 Input 物体上（和 KeyboardInput 并存，互不影响）。
 /// 需要场景里有 Camera Rig（OVRManager 负责更新手柄状态）。
@@ -32,6 +33,12 @@ public class ControllerInput : MonoBehaviour
     public bool log = true;
 
     int actionCount;
+
+    void Start()
+    {
+        // 没拖 SessionManager 时自动找（等待阶段靠它开始一班）
+        if (session == null) session = FindFirstObjectByType<SessionManager>();
+    }
 
     void Update()
     {
@@ -62,6 +69,15 @@ public class ControllerInput : MonoBehaviour
     void Place(WorkerController worker, BlockType block, OVRInput.Controller hand)
     {
         if (worker == null) return;
+
+        // 等待阶段：这一下只用来开始这一班
+        if (session != null && session.ConsumeStartPlacement(worker))
+        {
+            actionCount = 0;
+            if (log) Debug.Log($"[Controller] {block} → {worker.workerName} side: shift begins");
+            if (haptics) StartCoroutine(Buzz(hand, validStrength));
+            return;
+        }
 
         WorkerState before = worker.State;
         bool valid = worker.ReceiveBlock(block);

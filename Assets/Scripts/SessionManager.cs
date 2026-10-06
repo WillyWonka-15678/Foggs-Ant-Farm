@@ -1,11 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public enum ShiftPhase { Running, Report, NextShift }
+// Waiting = 等下一位观众放入第一块木块（不计时、不记录、不发提示）
+public enum ShiftPhase { Waiting, Running, Report, NextShift }
 public enum LeadStatus { Working, Idle, Underperforming }
 
 /// <summary>
-/// 一位观众的完整一班：计时、统计、反转、结束、报告、下一班。
+/// 一位观众的完整一班：等待 → 计时、统计、反转、结束 → 报告 → 下一班读秒 → 等待。
+/// 等待阶段放入任意一块木块开始这一班（这一块不作用于小人、不计入统计）。
 /// 场景里只放一个，挂在空物体上。Play 时自动生成三块仪表盘。
 /// </summary>
 public class SessionManager : MonoBehaviour
@@ -106,6 +108,9 @@ public class SessionManager : MonoBehaviour
 
     public PromptSystem Prompts { get; private set; }
 
+    /// <summary>等待阶段放入木块开始一班的那一刻（参数 = 放入的那一边的小人）。区域闪光和开始音效用它</summary>
+    public event System.Action<WorkerController> ShiftStartPlaced;
+
     public WorkerHUD LeftHUD { get; private set; }
     public WorkerHUD RightHUD { get; private set; }
     public YouHUD YouPanel { get; private set; }
@@ -140,7 +145,7 @@ public class SessionManager : MonoBehaviour
         RightHUD = workerRight != null ? WorkerHUD.Create(workerRight, this) : null;
         YouPanel = YouHUD.Create(this, LeftHUD, RightHUD);
 
-        StartNewShift();
+        EnterWaiting();
     }
 
     void OnDestroy()
@@ -167,8 +172,10 @@ public class SessionManager : MonoBehaviour
 
             case ShiftPhase.NextShift:
                 PhaseTimer -= dt;
-                if (PhaseTimer <= 0f) StartNewShift();
+                if (PhaseTimer <= 0f) EnterWaiting();
                 break;
+
+            // Waiting：什么都不做，等 ConsumeStartPlacement
         }
     }
 
@@ -326,9 +333,46 @@ public class SessionManager : MonoBehaviour
         Prompts.Clear();
     }
 
-    /// <summary>开始新的一班（下一位观众）。键盘 R 也会调用。</summary>
-    public void StartNewShift()
+    /// <summary>
+    /// 等待下一位观众：小人重置并一直休息，面板和提示隐藏，显示欢迎卡片。
+    /// 应用启动时、以及每次"下一班读秒"结束后进入。
+    /// </summary>
+    void EnterWaiting()
     {
+        Phase = ShiftPhase.Waiting;
+        ShiftTime = 0f;
+        PhaseTimer = 0f;
+        Revealed = false;
+        Terminated = false;
+        Status = LeadStatus.Working;
+        InactiveTime = 0f;
+
+        if (workerLeft != null)  workerLeft.ResetWorker(idle: true);
+        if (workerRight != null) workerRight.ResetWorker(idle: true);
+        Prompts.Reset();
+    }
+
+    /// <summary>
+    /// 所有输入脚本（键盘、手柄、虚拟木块）放木块前先调用。
+    /// 等待阶段时：这一次放置用来开始这一班，返回 true —— 调用方不要再把木块交给小人。
+    /// 其他阶段返回 false，照常放置。
+    /// </summary>
+    public bool ConsumeStartPlacement(WorkerController side)
+    {
+        if (Phase != ShiftPhase.Waiting) return false;
+
+        BeginShift(workersIdle: true);   // 小人继续休息，等观众用 NOTIFY 唤醒
+        ShiftStartPlaced?.Invoke(side);
+        Debug.Log($"[Session] Shift started by Team Lead #{TeamLeadNumber:000}");
+        return true;
+    }
+
+    /// <summary>立即开始新的一班，跳过等待（键盘 R、手柄右摇杆）。小人从 Working 开始，与原来一致。</summary>
+    public void StartNewShift() => BeginShift(workersIdle: false);
+
+    void BeginShift(bool workersIdle)
+    {
+        // 编号在开始时才加一
         TeamLeadNumber = PlayerPrefs.GetInt(PrefKey, firstTeamLeadNumber - 1) + 1;
         PlayerPrefs.SetInt(PrefKey, TeamLeadNumber);
         PlayerPrefs.Save();
@@ -357,6 +401,7 @@ public class SessionManager : MonoBehaviour
         InactiveTime = 0f;
         inactiveWarned = endingWarned = false;
 
+        // lastState 设为 Working：从等待开始时小人是 Idle，第一帧就会被当作"需要 NOTIFY"，发出教学提示
         for (int i = 0; i < 2; i++)
         {
             lastState[i] = WorkerState.Working;
@@ -364,8 +409,9 @@ public class SessionManager : MonoBehaviour
             pending[i] = false;
         }
 
-        if (workerLeft != null)  workerLeft.ResetWorker();
-        if (workerRight != null) workerRight.ResetWorker();
+        // 从等待开始时也重置一次（不切换动画），让闲置读秒从 0 开始
+        if (workerLeft != null)  workerLeft.ResetWorker(workersIdle);
+        if (workerRight != null) workerRight.ResetWorker(workersIdle);
         Prompts.Reset();
     }
 

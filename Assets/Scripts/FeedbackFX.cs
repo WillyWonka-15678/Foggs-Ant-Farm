@@ -70,6 +70,7 @@ public class FeedbackFX : MonoBehaviour
         if (!subscribed || session == null) return;
         if (session.workerLeft != null)  session.workerLeft.BlockReceived -= OnBlock;
         if (session.workerRight != null) session.workerRight.BlockReceived -= OnBlock;
+        session.ShiftStartPlaced -= OnShiftStart;
     }
 
     void TrySubscribe()
@@ -77,6 +78,7 @@ public class FeedbackFX : MonoBehaviour
         if (subscribed || session == null) return;
         if (session.workerLeft != null)  session.workerLeft.BlockReceived += OnBlock;
         if (session.workerRight != null) session.workerRight.BlockReceived += OnBlock;
+        session.ShiftStartPlaced += OnShiftStart;
         subscribed = true;
     }
 
@@ -223,6 +225,13 @@ public class FeedbackFX : MonoBehaviour
         else       StartCoroutine(RiseAndFall(icon, start, unit));
     }
 
+    /// <summary>等待阶段放入木块开始一班：那一边闪一下中性的白光（不飞图标）</summary>
+    void OnShiftStart(WorkerController w)
+    {
+        bool isLeft = session != null && w == session.workerLeft;
+        Flash(isLeft ? left : right, Color.white, 1);
+    }
+
     /// <summary>
     /// 反转后由悬浮提示调用：提示消失时，它的图标从提示的位置飞进 YOU 面板。
     /// </summary>
@@ -234,8 +243,12 @@ public class FeedbackFX : MonoBehaviour
 
         float unit = you.BaseHeight;
         var icon = SpawnIcon(kind, unit, 1f);
-        StartCoroutine(FlyToPanel(icon, from, unit, () => you.PanelCenter, 0.25f));
+        StartCoroutine(FlyToPanel(icon, from, unit, () => you.PanelCenter, 0.25f,
+                                  () => ArrivedAtYou?.Invoke(kind, you.PanelCenter)));
     }
+
+    /// <summary>图标飞进 YOU 面板的那一刻（SoundFX 用）</summary>
+    public event System.Action<BlockType, Vector3> ArrivedAtYou;
 
     // ================= 图标 =================
 
@@ -285,7 +298,8 @@ public class FeedbackFX : MonoBehaviour
     }
 
     /// <summary>有效：升起 → 飞向面板 → 缩小淡出（被吸收）</summary>
-    IEnumerator FlyToPanel(SpriteRenderer sr, Vector3 start, float unit, System.Func<Vector3> target, float riseScale = 1f)
+    IEnumerator FlyToPanel(SpriteRenderer sr, Vector3 start, float unit, System.Func<Vector3> target, float riseScale = 1f,
+                           System.Action onArrive = null)
     {
         Transform t = sr.transform;
         Vector3 baseScale = t.localScale;
@@ -311,6 +325,7 @@ public class FeedbackFX : MonoBehaviour
             yield return null;
         }
 
+        onArrive?.Invoke();
         Destroy(t.gameObject);
     }
 

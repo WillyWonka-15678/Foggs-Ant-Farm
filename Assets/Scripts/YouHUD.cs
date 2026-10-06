@@ -3,7 +3,7 @@ using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
-/// 中间的面板。反转前是 TEAM OUTPUT，反转后变成 TEAM LEAD #，结束时变成报告。
+/// 中间的面板。等待阶段是欢迎卡片，反转前是 TEAM OUTPUT，反转后变成 TEAM LEAD #，结束时变成报告。
 /// 反转后标题颜色 = 系统最近一次对观众用了哪块木块。
 /// 由 SessionManager 自动生成，不需要手动挂。
 /// </summary>
@@ -11,6 +11,8 @@ public class YouHUD : MonoBehaviour
 {
     const float W = 460f;
     const float H_LIVE = 256f, H_REPORT = 360f;
+    const float H_WELCOME = H_LIVE;   // 与进行中的 YOU 面板同样大小
+    const float FadeSpeed = 3f;       // 与小人面板的淡入淡出速度一致
     float curH = H_REPORT;   // 与创建时的画布高度一致
 
     SessionManager s;
@@ -34,6 +36,9 @@ public class YouHUD : MonoBehaviour
     RectTransform canvasRt;
     Image panel, header;
     TextMeshProUGUI title;
+
+    // 等待阶段的欢迎卡片与 YOU 面板交叉淡入淡出
+    CanvasGroup mainGroup, welcomeGroup;
 
     // 进行中
     GameObject live, revealOnly;
@@ -68,12 +73,16 @@ public class YouHUD : MonoBehaviour
         baseScale = baseHeight * s.youHudWidth / W;
         c.localScale = Vector3.one * baseScale;
 
-        panel = HUDFactory.Box(c, "Panel", 0, 0, W, H_REPORT, Palette.Panel);
-        header = HUDFactory.Box(c, "Header", 0, 0, W, 52, Palette.Gray);
-        title = HUDFactory.Label(c, "Title", 18, 0, W - 36, 52, 25, Color.white, bold: true);
+        // YOU 面板的全部内容放在 Main 下，方便整体淡入淡出
+        var main = HUDFactory.Rect(c, "Main", 0, 0, W, H_REPORT);
+        mainGroup = main.gameObject.AddComponent<CanvasGroup>();
+
+        panel = HUDFactory.Box(main, "Panel", 0, 0, W, H_REPORT, Palette.Panel);
+        header = HUDFactory.Box(main, "Header", 0, 0, W, 52, Palette.Gray);
+        title = HUDFactory.Label(main, "Title", 18, 0, W - 36, 52, 25, Color.white, bold: true);
 
         // ---------- 进行中 ----------
-        var liveRt = HUDFactory.Rect(c, "Live", 0, 0, W, H_REPORT);
+        var liveRt = HUDFactory.Rect(main, "Live", 0, 0, W, H_REPORT);
         live = liveRt.gameObject;
 
         quotaLabel = HUDFactory.Label(liveRt, "QuotaLabel", 18, 60, 424, 26, 19, Palette.Dim);
@@ -89,7 +98,7 @@ public class YouHUD : MonoBehaviour
         shiftLabel = HUDFactory.Label(liveRt, "Shift", 18, 218, 424, 28, 19, Palette.BarLight);
 
         // ---------- 报告 ----------
-        var repRt = HUDFactory.Rect(c, "Report", 0, 0, W, H_REPORT);
+        var repRt = HUDFactory.Rect(main, "Report", 0, 0, W, H_REPORT);
         report = repRt.gameObject;
 
         reportText = HUDFactory.Label(repRt, "ReportText", 18, 58, 424, 176, 19, Palette.BarLight,
@@ -107,6 +116,39 @@ public class YouHUD : MonoBehaviour
         }
         reviewedText = HUDFactory.Label(repRt, "Reviewed", 18, 290, 424, 28, 18, Palette.Dim);
         footerText   = HUDFactory.Label(repRt, "Footer", 18, 320, 424, 32, 21, Palette.Yellow, bold: true);
+
+        BuildWelcome(c);
+
+        // 启动时处于等待阶段：直接显示欢迎卡片，不播放淡入
+        bool waiting = s.Phase == ShiftPhase.Waiting;
+        mainGroup.alpha = waiting ? 0f : 1f;
+        welcomeGroup.alpha = waiting ? 1f : 0f;
+    }
+
+    /// <summary>欢迎卡片：贴在画布底边（和 YOU 面板同一个挂点），面板高度变化时不会跳动</summary>
+    void BuildWelcome(RectTransform c)
+    {
+        var rt = HUDFactory.Rect(c, "Welcome", 0, 0, W, H_WELCOME);
+        rt.anchorMin = rt.anchorMax = Vector2.zero;
+        rt.pivot = Vector2.zero;
+        rt.anchoredPosition = Vector2.zero;
+        welcomeGroup = rt.gameObject.AddComponent<CanvasGroup>();
+
+        // 整张卡片铺满 NOTIFY 红：欢迎卡片本身就是系统发出的第一个"提示"（Prompt）
+        Color red = Palette.Notify;
+        red.a = 0.95f;
+        HUDFactory.Box(rt, "Panel", 0, 0, W, H_WELCOME, red);
+        HUDFactory.Box(rt, "Header", 0, 0, W, 52, Color.Lerp(Palette.Notify, Color.black, 0.25f));
+        HUDFactory.Label(rt, "Title", 18, 0, W - 36, 52, 25, Color.white, bold: true).text = "Welcome, Team Lead.";
+
+        HUDFactory.Label(rt, "Ready", 18, 70, 424, 30, 21, Color.white).text = "Your team is ready.";
+        HUDFactory.Label(rt, "Begin", 18, 106, 424, 60, 21, Color.white,
+                         TextAlignmentOptions.TopLeft, wrap: true, bold: true).text = "Place any block into the box to begin your shift.";
+
+        // 小字：红底上灰色看不清，用半透明白色，依然比正文弱
+        HUDFactory.Label(rt, "Consent", 18, 204, 424, 40, 13, new Color(1f, 1f, 1f, 0.7f),
+                         TextAlignmentOptions.BottomLeft, wrap: true).text =
+            "By beginning your shift, you agree that your performance may be recorded.";
     }
 
     void LateUpdate()
@@ -125,8 +167,8 @@ public class YouHUD : MonoBehaviour
         else if (right != null) p = right.transform.position;
         else return;
 
-        // 放大：报告期间平滑放大
-        bool running = s.Phase == ShiftPhase.Running;
+        // 放大：报告期间平滑放大。等待阶段的欢迎卡片和进行中的 YOU 面板在同一位置、同一大小
+        bool running = s.Phase == ShiftPhase.Running || s.Phase == ShiftPhase.Waiting;
         float targetScale = running ? 1f : Mathf.Max(1f, s.reportScale);
         scaleMul = Mathf.Lerp(scaleMul, targetScale, 1f - Mathf.Exp(-6f * Time.deltaTime));
         canvasRt.localScale = Vector3.one * (baseScale * scaleMul);
@@ -187,6 +229,14 @@ public class YouHUD : MonoBehaviour
 
     void Refresh()
     {
+        // 等待阶段：YOU 面板淡出、欢迎卡片淡入；开始后反过来
+        bool waiting = s.Phase == ShiftPhase.Waiting;
+        float step = Time.deltaTime * FadeSpeed;
+        mainGroup.alpha = Mathf.MoveTowards(mainGroup.alpha, waiting ? 0f : 1f, step);
+        welcomeGroup.alpha = Mathf.MoveTowards(welcomeGroup.alpha, waiting ? 1f : 0f, step);
+        welcomeGroup.gameObject.SetActive(welcomeGroup.alpha > 0f);
+        if (waiting && mainGroup.alpha <= 0f) return;   // YOU 面板已完全隐藏，不用更新
+
         bool running = s.Phase == ShiftPhase.Running;
         live.SetActive(running);
         report.SetActive(!running);

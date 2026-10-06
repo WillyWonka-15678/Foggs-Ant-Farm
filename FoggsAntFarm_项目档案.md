@@ -202,7 +202,8 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 
 | 时间 | 阶段 | 内容 |
 |---|---|---|
-| 0:00 | 进场 | 墙面一句话分配身份（如 *"Welcome, Team Lead."*）。不讲规则 |
+| 开始前 | **等待** | 两个小人一直休息；只显示红色欢迎卡片（见第 12 节），其他面板和提示全部隐藏。不计时、不记录、不发提示、不判定停手 |
+| 0:00 | 开始 | 观众放入任意一块木块（任意一边、任意类型）开始这一班。这一块**不作用于小人、不计入统计**；放入的那一边闪一下白光 + 开始音效；欢迎卡片淡出，面板淡入。小人**仍在休息**，马上出现"Place NOTIFY to reactivate"的教学提示——观众的第一个动作就是把休息中的人叫起来 |
 | 0:00–1:30 | 操作 | 边玩边学，系统用即时提示教学 |
 | 约 1:30 | **反转** | 第 5 次操作或 90 秒（先到为准），中间面板无声变成 TEAM LEAD (YOU) |
 | 1:30–3:00 | 察觉 | 观众也有了状态和配额 |
@@ -214,7 +215,13 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 
 停手是唯一提前离开的方式，但离开也被记录。
 
-**下一班**：*"Your next shift begins in 00:10"*，归零后小人和数据重置，下一位观众开始。
+**下一班**：*"Your next shift begins in 00:10"*，归零后回到**等待阶段**（小人重置为休息，显示欢迎卡片），等下一位观众放入木块。
+
+**进场文字**：原计划写在墙上的 *"Welcome, Team Lead."* 现在由头显里的欢迎卡片说出。墙面是否还需要文字待定。
+
+**工作人员快捷键**：键盘 R / 手柄右摇杆 = 立即开始新的一班，跳过等待（小人从 Working 开始，与旧版一致）。
+
+**开局的两条提示**：从等待开始时两个小人都在休息，所以开局同时出现两条提示——先被检查到的那个（左边的工人）收到教学提示 *"is idle. Place NOTIFY to reactivate."*，另一个收到 *"idle 00:00 productivity loss"*（教学提示只出一次）。是否要调整待真人测试决定。
 
 ### 观众类型（设计时参考）
 好心管理者（频繁使用，小人倒下最多，评分最高）、分析型实验者（故意放错测规则）、共情观察者（看到倒下后犹豫）、抵抗者（很早停手，小人安然无恙，自己被 Terminated）、过度投入的竞争者（最快，Compliance 最高，被管理得最彻底）。
@@ -252,7 +259,14 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 | 报告 / 下一班读秒 | 10 / 10 秒 |
 | 报告审阅人 | Regional Manager |
 | 报告放大倍数 | 1.6 |
-| 编号 | 三位数 `#007`，保存在 PlayerPrefs，每位观众 +1；SessionManager 右键 **Reset Team Lead Number** 重置，从 First Team Lead Number（默认 1）开始。建议开展前重置 |
+| 编号 | 三位数 `#007`，保存在 PlayerPrefs，**在一班开始时**（放入第一块木块或按 R）才 +1，只启动应用不会用掉编号；SessionManager 右键 **Reset Team Lead Number** 重置，从 First Team Lead Number（默认 1）开始。建议开展前重置 |
+
+### 流程阶段（ShiftPhase）
+**Waiting（等待）→ Running（进行中）→ Report（报告 10 秒）→ NextShift（下一班读秒 10 秒）→ Waiting**
+
+- 应用启动时进入 Waiting
+- 所有输入脚本放木块前先调用 `SessionManager.ConsumeStartPlacement(小人)`：Waiting 时返回 true，这一块用来开始这一班，不交给小人；其他阶段返回 false，照常放置
+- 开始时触发 `ShiftStartPlaced` 事件，FeedbackFX（区域白光）和 SoundFX（开始音效）订阅它
 
 ---
 
@@ -303,7 +317,7 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 
 | 层 | 内容 |
 |---|---|
-| 最上 | **YOU 面板**：固定在小人面板正上方（底边比小人面板顶边高 `youHudLift` = 0.05 个小人身高），并往**远离观众**的方向推箱子深度的 `youHudBack` = 0.5，不受提示影响 |
+| 最上 | **YOU 面板**（等待阶段在同一位置、同一大小显示欢迎卡片）：固定在小人面板正上方（底边比小人面板顶边高 `youHudLift` = 0.05 个小人身高），并往**远离观众**的方向推箱子深度的 `youHudBack` = 0.5，不受提示影响 |
 | 中间 | 两块**小人面板**（各自头顶） |
 | 箱子左右两侧外面、靠前角 | 两个小人各自的提示堆（宽约箱子宽度的 0.55，从箱高 0.6 处往上叠） |
 | 箱子正面上沿中点、再往观众方向推 5 cm | **观众本人的提示堆**（宽 25 cm，最新一条的上沿与箱顶齐平，往下叠，可以低于桌面）。即两个标定点的正中间 |
@@ -318,6 +332,19 @@ WorkerController 有三个道具清单（Working / Idle / Exhausted 时显示）
 ---
 
 ## 12. 面板内容
+
+### 欢迎卡片（等待阶段）
+位置和大小与进行中的 YOU 面板相同，和 YOU 面板交叉淡入淡出（约 0.3 秒）。其他面板和提示全部隐藏。
+```
+Welcome, Team Lead.
+Your team is ready.
+Place any block into the box to begin your shift.        （加粗）
+By beginning your shift, you agree that your performance may be recorded.   （很小的字）
+```
+- **整张卡片铺满 NOTIFY 红 #D85A30**（95% 不透明），标题栏为深一点的红，文字白色
+- 理由：欢迎卡片本身就是系统发出的第一个"提示"（福格模型的 Prompt），观众还没开始就已经被提示了一次
+- 最下面的小字原定为灰色，但红底上灰色看不清，改为 70% 透明度的白色，仍比正文弱
+- 小字是"同意被记录"的条款：放下第一块木块的同时，观众就"同意"了
 
 ### 小人面板
 | 元素 | 内容 | 理由 |
@@ -366,9 +393,50 @@ Your next shift begins in 00:10
 - **有效放置**：彩色图标从区域升起，**飞进对应小人面板**，缩小消失
 - **无效放置**：灰色图标升起一小段，停顿，加速掉落淡出
 - **反转后**：提示完成时，图标从提示位置**飞进 YOU 面板**
+- **开始一班**：等待阶段放入木块时，放入的那一边闪一下白光（不飞图标）
 
 关键时刻两者同时发生：观众按提示放下 NOTIFY，一个图标飞进小人面板，另一个飞进 YOU 面板——同一个动作被记录两次。
 飞进 YOU 的是 **Kind** 图标，所以照一条红色 NOTIFY 教学提示做完后，飞进去的是绿色 ASSIST：系统记下的是"我帮了你一次"。（若觉得太隐晦，可改为飞提示上显示的图标。）
+
+---
+
+## 13b. 音效（SoundFX）
+
+### 两个声音世界（已确定）
+| | 系统的声音 | 小人的声音 |
+|---|---|---|
+| 内容 | 提示、夸奖、配额、木块放置确认 | 工作、倒下、休息 |
+| 风格 | App 通知那种精致、悦耳、"好用"的 UI 音效 | 小、真实、底噪一样的身体声音 |
+| 音量 | 清楚、靠前 | 很轻 |
+
+对比本身就在说话：系统的声音好听、响亮、让人想要；劳动和倒下的声音微弱，容易被盖过去。
+- 三块木块各有固定音色（NOTIFY 短促提醒 / BONUS 上扬兴奋 / ASSIST 柔和），和颜色一样是"语言"
+- 反转后系统对观众用的是同一套声音（镜像）；照提示放木块时依次听到：放置音 → 完成音 → 图标飞进 YOU 的"记录音"（同一个动作被记录两次）
+- **反转本身无声**
+- 先只做音效，**系统语音播报之后再加**
+- 展览用**头显自带扬声器**
+
+### 第一批（已实现；已放入 Kenney 音效，位于 `Assets/Sound/`，SoundFX 已挂在 Session 上）
+| 事件 | 槽位 |
+|---|---|
+| 抓起虚拟木块 | Grab |
+| 有效放置 | Place Notify / Bonus / Assist（声音在小人位置） |
+| 放错 | Place Invalid（闷、不刺耳） |
+| 松手残影消失 / 原位长出 | Vanish / Respawn（可留空） |
+| 开始一班 | Shift Start（可留空） |
+| 提示出现 | Prompt Notify / Bonus / Assist（按 Kind，声音在提示条位置） |
+| 照做了 / 奖励到时 | Prompt Done |
+| 任务错过（变灰掉落） | Prompt Missed |
+| 图标飞进 YOU | Recorded To You |
+
+**没处理的任务重复提醒**：在闪烁达到最亮的那一刻响，跟呼吸闪烁同步。刚出现时约每 3 秒一次（Remind Interval），拖得越久越频繁（与闪烁同一个加速倍数，最多 3 倍 → 约每 1 秒）。**同一时间只有拖得最久的那条出声**。默认不设次数上限（Max Reminders = 0）。Remind Interval = 0 则每次闪烁都响（不建议：NOTIFY 加速后每秒 6 声）。
+
+**技术**：SoundFX 挂在 Session 上，只订阅事件（WorkerController.BlockReceived、FloatingPrompts 的 ToastShown / ToastResolved / ToastVoided / TaskPulse、FeedbackFX.ArrivedAtYou、VirtualBlock 的静态事件 Grabbed / Dropped / Respawned、SessionManager.ShiftStartPlaced），不改逻辑。Unity 自带 3D 声音（没装 Meta 音频 SDK），12 个声道池，同一声音 0.08 秒冷却，空槽位自动跳过。
+
+**音效素材建议**：Kenney（kenney.nl，CC0）的 Interface Sounds / UI Audio（系统声音）、Impact Sounds（放错）；freesound CC0 补脚步、键盘。导入时勾 **Force To Mono**，Load Type = Decompress On Load。Project Settings → Audio → DSP Buffer Size 已设为 **Best latency**（256）。
+
+### 第二批（待做）
+小人的循环声（骑手脚步、工人键盘，很轻）、倒下的闷响、一班流程（剩 30 秒提醒、最后 10 秒滴答、报告出现时打印 / 盖章声）。
 
 ---
 
@@ -409,7 +477,7 @@ Your next shift begins in 00:10
 | 左（Office / Female_Dress） | Q | W | E |
 | 右（Rider / Male_Shirt） | I | O | P |
 
-R = 立即开始新的一班。脚本兼容新旧输入系统。
+R = 立即开始新的一班（跳过等待）。等待阶段按任意放置键 = 开始这一班。脚本兼容新旧输入系统。
 
 ### 头显：手柄（ControllerInput，与 KeyboardInput 并存）
 | | NOTIFY | BONUS | ASSIST |
@@ -417,7 +485,7 @@ R = 立即开始新的一班。脚本兼容新旧输入系统。
 | 左手柄 → 左边小人 | X | Y | 扳机 |
 | 右手柄 → 右边小人 | A | B | 扳机 |
 
-按下右摇杆 = 开始新的一班。有震动反馈（有效 0.6 / 无效 0.2）。标定期间自动停用，避免误放。
+按下右摇杆 = 立即开始新的一班（跳过等待）。等待阶段按任意放置键 = 开始这一班（轻震一下）。有震动反馈（有效 0.6 / 无效 0.2）。标定期间自动停用，避免误放。
 
 ### 头显：用手抓虚拟木块（VirtualBlock）
 - `VirtualScene/Blocks` 下有虚拟木块（每种两块），用 Building Blocks 加了 Interaction SDK 的抓取组件（Grabbable / GrabInteractable / HandGrabInteractable），手和手柄都能抓
@@ -427,7 +495,7 @@ R = 立即开始新的一班。脚本兼容新旧输入系统。
 - 图标自动贴在四个侧面和顶面（读 SessionManager 里的彩色图标）。顶面图标的朝向按两个区域的连线（左区 → 右区 = 观众的右手方向）判断，并吸附到木块的边上（2026-10-06 修：原来用启动时的相机方向，在头显里会斜）
 
 ### 架构原则
-输入与逻辑分离：WorkerController 只提供 `ReceiveBlock(BlockType)`，自己不监听任何输入。KeyboardInput / ControllerInput / VirtualBlock 都只负责"哪个区域放了哪种木块"。换成 QR / RFID 脚本时，其他脚本一行不改。所有统计通过 `WorkerController.BlockReceived` 事件自动接上。
+输入与逻辑分离：WorkerController 只提供 `ReceiveBlock(BlockType)`，自己不监听任何输入。KeyboardInput / ControllerInput / VirtualBlock 都只负责"哪个区域放了哪种木块"。换成 QR / RFID 脚本时，其他脚本一行不改。新的输入脚本放木块前要先调用 `session.ConsumeStartPlacement(小人)`，返回 true 就不要再交给小人（等待阶段用来开始一班）。所有统计通过 `WorkerController.BlockReceived` 事件自动接上。
 
 ---
 
@@ -440,6 +508,7 @@ R = 立即开始新的一班。脚本兼容新旧输入系统。
 | `ControllerInput` | Input | 头显手柄模拟放木块（第 15 节） |
 | `VirtualBlock` | 每块虚拟木块 | 用手抓取的木块：松手判定、消失与重生、贴图标（第 15 节） |
 | `BoxCalibrator` | Session | 手柄两点标定，把 VirtualScene 对齐到真实箱子（第 17 节） |
+| `SoundFX` | Session | 全部音效（第 13b 节） |
 | `DebugOverlay` | Session | 头显里的调试面板：帧率、班次状态、最近日志。按左摇杆（编辑器里按 F1）开关，默认隐藏 |
 | `QRTestProbe` | 只在 MR_Test 场景 | QR 码识别测试：显示内容、追踪状态、抖动、更新频率，按 A / B 计识别用时和消失用时 |
 | `SessionManager` | Session | 一班流程、统计、反转、报告、重置、编号；自动生成三块面板；图标 Sprite 槽位 |
@@ -539,6 +608,11 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
 | 报告才出现编号 #007 | "你"在最后一刻变成"第 N 个"，暗示可替换 |
 | 报告灰图标只在报告出现 | 避免提前剧透"真实含义" |
 | 报告时隐藏小人面板 | 视野让给报告；小人第一次无人管理 |
+| 开场等待阶段：放入任意木块才开始 | 一班由观众自己的动作开启；只启动应用不用掉编号 |
+| 从等待开始时小人继续休息 | 观众的第一个动作就是把休息中的人叫起来 |
+| 欢迎卡片铺满 NOTIFY 红 | 欢迎卡片本身就是系统的第一个 Prompt |
+| 两个声音世界 | 系统声音精致响亮，劳动和倒下的声音微弱 |
+| 未处理任务的提醒音跟着闪烁越来越快 | 声音也像不会自己消失的红点 |
 
 ---
 
@@ -572,12 +646,16 @@ Passthrough 叠加效果、标定精度、木块识别、暗场聚光灯下稳�
 - [ ] QR 测试结果记录到档案，决定 QR / RFID
 - [ ] 标定结果存为持久化空间锚点，重启自动恢复
 - [ ] 头显里验证：观众提示新位置的可读性、木块消失 / 重生效果、顶面图标方向
-- [ ] 墙面进场文字定稿
+- [x] 第一批音效文件已放入（Kenney）
+- [ ] 在头显扬声器上试听，调音量和提醒频率
+- [ ] 音效第二批：小人循环声、倒下、一班流程
+- [ ] 头显里验证：等待阶段与欢迎卡片、开局两条提示是否合适
+- [ ] 墙面进场文字定稿（欢迎语已在头显里，墙面是否还需要）
 - [ ] 真人测试，观察反转是否被注意到
 
 **可选增强**
 - 小票打印机打印报告让观众带走（灰色图标需做黑白单色版）
-- 音效：放置、警报、夸奖（系统语音播报）
+- 系统语音播报（音效已在做，见第 13b 节）
 - 区域闪烁 / 道具出现的 glitch 效果
 - 反转时极轻的信号（如面板闪一下）——等真人测试决定
 - 报告期间小人特殊表现（定格或全部倒下）
