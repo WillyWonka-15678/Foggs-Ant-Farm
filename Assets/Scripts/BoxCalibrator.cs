@@ -6,14 +6,16 @@ using TMPro;
 /// 手柄两点标定：把虚拟箱子（以及整个 VirtualScene）对齐到真实的亚克力箱。
 ///
 /// 流程：
-///   1. 同时按住两个手柄的握把键 2 秒进入标定（头显里第一次启动时自动进入）
+///   1. 同时按住两个手柄的握把键 2 秒进入标定（头显里启动时自动进入）
+///      只有等待阶段能进入；手里抓着木块时不计时
 ///   2. 右手柄前端的黄色小球碰住真实箱子"靠近观众那一面"的左上角，按右扳机
 ///   3. 再碰右上角，按右扳机
 ///   4. 微调：左摇杆前后左右平移，右摇杆上下移动 / 左右旋转
 ///      A = 完成，B = 重新点
+///   点角的两步里按 B = 取消：退出标定，场景回到进入标定之前的位置
 ///
 /// 正面自动判断：根据 Zone_Left / Zone_Right 的位置，保证标定后左区永远在观众左手边。
-/// 标定期间自动停用 ControllerInput，避免扳机和 A 键误放木块。
+/// 标定期间自动停用 ControllerInput（避免扳机和 A 键误放木块），虚拟木块看得见但拿不起来。
 /// 挂在 Session 物体上。
 /// </summary>
 public class BoxCalibrator : MonoBehaviour
@@ -57,6 +59,9 @@ public class BoxCalibrator : MonoBehaviour
     Step step = Step.Off;
 
     OVRCameraRig rig;
+    SessionManager session;
+    Vector3 savedPos;        // 进入标定前场景的位置和朝向，取消时恢复
+    Quaternion savedRot;
     Transform marker;
     GameObject ui;
     TextMeshProUGUI uiText;
@@ -71,6 +76,7 @@ public class BoxCalibrator : MonoBehaviour
     void Start()
     {
         rig = FindFirstObjectByType<OVRCameraRig>();
+        session = FindFirstObjectByType<SessionManager>();
 
         if (caseBox != null)
         {
@@ -97,9 +103,11 @@ public class BoxCalibrator : MonoBehaviour
 
     void Update()
     {
-        // 隐藏入口：同时按住两个握把
+        // 隐藏入口：同时按住两个握把。
+        // 只在等待阶段有效（观众开始操作后不再标定）；手里抓着木块时不算（握把键也是抓木块的键）
         bool both = OVRInput.Get(OVRInput.RawButton.LHandTrigger) && OVRInput.Get(OVRInput.RawButton.RHandTrigger);
-        if (both && step == Step.Off)
+        bool allowed = (session == null || session.Phase == ShiftPhase.Waiting) && !VirtualBlock.AnyHeld;
+        if (both && allowed && step == Step.Off)
         {
             holdTimer += Time.deltaTime;
             if (holdTimer >= holdToEnter) { holdTimer = 0f; Begin(); }
@@ -120,6 +128,7 @@ public class BoxCalibrator : MonoBehaviour
                     step = Step.PickRight;
                     Buzz();
                 }
+                else if (OVRInput.GetDown(OVRInput.RawButton.B)) { Cancel(); return; }
                 break;
 
             case Step.PickRight:
@@ -129,6 +138,7 @@ public class BoxCalibrator : MonoBehaviour
                     step = Step.Adjust;
                     Buzz();
                 }
+                else if (OVRInput.GetDown(OVRInput.RawButton.B)) { Cancel(); return; }
                 break;
 
             case Step.Adjust:
@@ -146,10 +156,28 @@ public class BoxCalibrator : MonoBehaviour
 
     public void Begin()
     {
+        if (virtualScene != null)
+        {
+            savedPos = virtualScene.position;
+            savedRot = virtualScene.rotation;
+        }
         step = Step.PickLeft;
         SetInputs(false);
+        VirtualBlock.SetLocked(true);    // 标定完才能拿起木块
         ShowCalibrationVisuals(true);
         Debug.Log("[Calibration] Started");
+    }
+
+    /// <summary>取消标定：场景回到进入标定之前的位置</summary>
+    void Cancel()
+    {
+        if (virtualScene != null) virtualScene.SetPositionAndRotation(savedPos, savedRot);
+        step = Step.Off;
+        SetInputs(true);
+        VirtualBlock.SetLocked(false);
+        ShowCalibrationVisuals(false);
+        Buzz();
+        Debug.Log("[Calibration] Cancelled. Scene restored.");
     }
 
     void Finish()
@@ -157,12 +185,23 @@ public class BoxCalibrator : MonoBehaviour
         step = Step.Off;
         HasCalibrated = true;
         SetInputs(true);
+        VirtualBlock.SetLocked(false);
         ShowCalibrationVisuals(false);
         Buzz();
         Debug.Log($"[Calibration] Done. Scene at {virtualScene.position:F3}, yaw {virtualScene.eulerAngles.y:0.0}°, width error {widthError * 100f:0.0} cm");
     }
 
     void SetInputs(bool on)
+    {
+        CancelInvoke(nameof(EnableInputs));
+        // 恢复时稍等一下：退出标定按的 A / B 不能在同一瞬间又被当成"放木块"
+        if (on) Invoke(nameof(EnableInputs), 0.2f);
+        else ApplyInputs(false);
+    }
+
+    void EnableInputs() => ApplyInputs(true);
+
+    void ApplyInputs(bool on)
     {
         if (disableWhileCalibrating == null) return;
         foreach (var b in disableWhileCalibrating) if (b != null) b.enabled = on;
@@ -307,16 +346,16 @@ public class BoxCalibrator : MonoBehaviour
         switch (step)
         {
             case Step.PickLeft:
-                uiText.text = "<b>CALIBRATION 1 / 2</b>\nTouch the <color=#FAC775>FRONT-LEFT</color> top corner of the box with the yellow ball, then pull the right trigger.";
+                uiText.text = "<b>CALIBRATION 1 / 2</b>\nTouch the <color=#FAC775>FRONT-LEFT</color> top corner of the box with the yellow ball, then pull the right trigger.   <b>B</b>: cancel";
                 break;
             case Step.PickRight:
-                uiText.text = "<b>CALIBRATION 2 / 2</b>\nTouch the <color=#FAC775>FRONT-RIGHT</color> top corner, then pull the right trigger.";
+                uiText.text = "<b>CALIBRATION 2 / 2</b>\nTouch the <color=#FAC775>FRONT-RIGHT</color> top corner, then pull the right trigger.   <b>B</b>: cancel";
                 break;
             case Step.Adjust:
                 string err = Mathf.Abs(widthError) <= 0.015f
                     ? $"<color=#5DCAA5>width error {widthError * 100f:0.0} cm</color>"
                     : $"<color=#F09595>width error {widthError * 100f:0.0} cm — check the ball position</color>";
-                uiText.text = $"<b>FINE TUNE</b>   {err}\nLeft stick: move    Right stick: up / down, rotate\n<b>A</b>: done    <b>B</b>: redo";
+                uiText.text = $"<b>FINE TUNE</b>   {err}\nLeft stick: move    Right stick: up / down, rotate\n<b>A</b>: done    <b>B</b>: redo (then B again to cancel)";
                 break;
         }
     }

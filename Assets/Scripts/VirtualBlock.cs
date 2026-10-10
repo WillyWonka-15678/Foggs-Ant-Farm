@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Oculus.Interaction;
 
@@ -45,6 +46,31 @@ public class VirtualBlock : MonoBehaviour
     /// <summary>新木块在原位开始长出来</summary>
     public static event System.Action<VirtualBlock> Respawned;
 
+    // ---------- 所有木块共用的状态（BoxCalibrator / ControllerInput 用） ----------
+    static readonly List<VirtualBlock> all = new List<VirtualBlock>();
+    static int heldCount;
+
+    /// <summary>现在是否有木块正被手 / 手柄抓着</summary>
+    public static bool AnyHeld => heldCount > 0;
+
+    /// <summary>标定期间为 true：木块看得见但拿不起来，松手也不算放置</summary>
+    public static bool Locked { get; private set; }
+
+    /// <summary>锁定 / 解锁全部木块的抓取（标定开始和结束时由 BoxCalibrator 调用）</summary>
+    public static void SetLocked(bool locked)
+    {
+        Locked = locked;
+        foreach (var b in all) if (b != null) b.ApplyLock();
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics()
+    {
+        all.Clear();
+        heldCount = 0;
+        Locked = false;
+    }
+
     IPointable pointable;
     Rigidbody rb;
     Transform homeParent;
@@ -89,10 +115,42 @@ public class VirtualBlock : MonoBehaviour
         else Debug.LogWarning($"[VirtualBlock] {name}: 没有找到抓取组件，请先用 Building Blocks 给它加上抓取功能");
     }
 
+    void OnEnable()
+    {
+        all.Add(this);
+        if (Locked) ApplyLock();
+    }
+
+    void OnDisable()
+    {
+        all.Remove(this);
+        if (holders > 0) { holders = 0; heldCount = Mathf.Max(0, heldCount - 1); }
+    }
+
     void OnDestroy()
     {
         if (pointable != null) pointable.WhenPointerEventRaised -= OnPointer;
     }
+
+    /// <summary>开关这块木块上的"可抓取"组件（Interaction SDK 的各种 Interactable）。木块本身照常显示</summary>
+    void ApplyLock()
+    {
+        if (Locked)
+        {
+            // 只关掉当前开着的，解锁时原样恢复（本来就关着的不会被误开）
+            foreach (var mb in GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (mb is IInteractable && mb.enabled) { mb.enabled = false; lockedOff.Add(mb); }
+            }
+        }
+        else
+        {
+            foreach (var mb in lockedOff) if (mb != null) mb.enabled = true;
+            lockedOff.Clear();
+        }
+    }
+
+    readonly List<MonoBehaviour> lockedOff = new List<MonoBehaviour>();
 
     // ================= 抓取事件 =================
 
@@ -102,7 +160,7 @@ public class VirtualBlock : MonoBehaviour
         {
             case PointerEventType.Select:
                 holders++;
-                if (holders == 1) Grabbed?.Invoke(this);
+                if (holders == 1) { heldCount++; Grabbed?.Invoke(this); }
                 // 新木块还在放大时就被抓起：立刻恢复正常大小
                 if (returning != null) { StopCoroutine(returning); returning = null; }
                 transform.localScale = homeLocalScale;
@@ -110,8 +168,14 @@ public class VirtualBlock : MonoBehaviour
 
             case PointerEventType.Unselect:
             case PointerEventType.Cancel:
-                holders = Mathf.Max(0, holders - 1);
-                if (holders == 0) Released();
+                // 只有真的被抓着的木块松开才算（没抓起就收到取消事件时不处理）
+                if (holders == 0) break;
+                holders--;
+                if (holders == 0)
+                {
+                    heldCount = Mathf.Max(0, heldCount - 1);
+                    Released();
+                }
                 break;
         }
     }
@@ -124,7 +188,12 @@ public class VirtualBlock : MonoBehaviour
         if (Inside(zoneLeft))       { target = session != null ? session.workerLeft  : null; side = "LEFT"; }
         else if (Inside(zoneRight)) { target = session != null ? session.workerRight : null; side = "RIGHT"; }
 
-        if (target != null && session != null && session.ConsumeStartPlacement(target))
+        if (Locked)
+        {
+            // 标定期间：不算放置，也不会开始一班
+            Debug.Log($"[Hand] {type} released during calibration (ignored)");
+        }
+        else if (target != null && session != null && session.ConsumeStartPlacement(target))
         {
             // 等待阶段：这一块只用来开始这一班，不交给小人
             Debug.Log($"[Hand] {type} → {side}: shift begins");

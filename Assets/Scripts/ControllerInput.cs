@@ -42,15 +42,19 @@ public class ControllerInput : MonoBehaviour
 
     void Update()
     {
-        // 左手柄 → 左边小人
-        if (OVRInput.GetDown(OVRInput.RawButton.X))             Place(workerLeft,  BlockType.Notify, OVRInput.Controller.LTouch);
-        if (OVRInput.GetDown(OVRInput.RawButton.Y))             Place(workerLeft,  BlockType.Bonus,  OVRInput.Controller.LTouch);
-        if (OVRInput.GetDown(OVRInput.RawButton.LIndexTrigger)) Place(workerLeft,  BlockType.Assist, OVRInput.Controller.LTouch);
+        // 手里抓着虚拟木块时，放置键不起作用（否则拿着木块碰到扳机会多放一次）
+        if (!VirtualBlock.AnyHeld)
+        {
+            // 左手柄 → 左边小人
+            if (OVRInput.GetDown(OVRInput.RawButton.X))             Place(workerLeft,  BlockType.Notify, OVRInput.Controller.LTouch);
+            if (OVRInput.GetDown(OVRInput.RawButton.Y))             Place(workerLeft,  BlockType.Bonus,  OVRInput.Controller.LTouch);
+            if (OVRInput.GetDown(OVRInput.RawButton.LIndexTrigger)) Place(workerLeft,  BlockType.Assist, OVRInput.Controller.LTouch);
 
-        // 右手柄 → 右边小人
-        if (OVRInput.GetDown(OVRInput.RawButton.A))             Place(workerRight, BlockType.Notify, OVRInput.Controller.RTouch);
-        if (OVRInput.GetDown(OVRInput.RawButton.B))             Place(workerRight, BlockType.Bonus,  OVRInput.Controller.RTouch);
-        if (OVRInput.GetDown(OVRInput.RawButton.RIndexTrigger)) Place(workerRight, BlockType.Assist, OVRInput.Controller.RTouch);
+            // 右手柄 → 右边小人
+            if (OVRInput.GetDown(OVRInput.RawButton.A))             Place(workerRight, BlockType.Notify, OVRInput.Controller.RTouch);
+            if (OVRInput.GetDown(OVRInput.RawButton.B))             Place(workerRight, BlockType.Bonus,  OVRInput.Controller.RTouch);
+            if (OVRInput.GetDown(OVRInput.RawButton.RIndexTrigger)) Place(workerRight, BlockType.Assist, OVRInput.Controller.RTouch);
+        }
 
         // 新的一班
         if (OVRInput.GetDown(OVRInput.RawButton.RThumbstick))
