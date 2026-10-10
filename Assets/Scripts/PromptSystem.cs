@@ -4,7 +4,7 @@ using UnityEngine;
 
 /// <summary>
 /// 一条系统消息。
-///   Target     = 相关的小人；null 表示属于观众本人（显示在 YOU 下方）
+///   Target     = 相关的小人；null 表示属于观众本人（显示在箱子正前方的观众提示堆）
 ///   IsResolved = 任务完成条件；不为 null 的是"任务型"消息，做完才消失
 ///   IsVoid     = 失效条件：情况自己变了，任务不再成立
 ///   Duration   = 大于 0 时定时消失（奖励型）；小于等于 0 时一直保留
